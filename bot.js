@@ -48,7 +48,7 @@ function post(url, data) {
 
 // ─── FETCH P2P DATA ───────────────────────────────────────
 function fetchP2P(tradeType, coin) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const body = JSON.stringify({
       asset: coin,
       fiat: 'KES',
@@ -67,25 +67,63 @@ function fetchP2P(tradeType, coin) {
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
-        'User-Agent': 'Mozilla/5.0'
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Origin': 'https://p2p.binance.com',
+        'Referer': 'https://p2p.binance.com/en/trade/all-payments/USDT?fiat=KES',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+        'sec-ch-ua-mobile': '?1',
+        'sec-ch-ua-platform': '"Android"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'TE': 'trailers'
       }
     };
 
     const req = https.request(options, res => {
-      let d = '';
-      res.on('data', c => d += c);
-      res.on('end', () => {
+      const chunks = [];
+
+      // handle gzip/deflate
+      let stream = res;
+      if (res.headers['content-encoding'] === 'gzip') {
+        const zlib = require('zlib');
+        stream = res.pipe(zlib.createGunzip());
+      } else if (res.headers['content-encoding'] === 'br') {
+        const zlib = require('zlib');
+        stream = res.pipe(zlib.createBrotliDecompress());
+      } else if (res.headers['content-encoding'] === 'deflate') {
+        const zlib = require('zlib');
+        stream = res.pipe(zlib.createInflate());
+      }
+
+      stream.on('data', c => chunks.push(c));
+      stream.on('end', () => {
         try {
+          const d = Buffer.concat(chunks).toString('utf8');
           const parsed = JSON.parse(d);
-          resolve(parsed.data || []);
+          if (parsed.data && parsed.data.length > 0) {
+            resolve(parsed.data);
+          } else {
+            console.log(`ℹ️  ${tradeType} ${coin}: ${parsed.message || 'empty response'}`);
+            resolve([]);
+          }
         } catch(e) {
           resolve([]);
         }
       });
+      stream.on('error', () => resolve([]));
     });
 
-    req.on('error', () => resolve([]));
-    req.setTimeout(10000, () => { req.destroy(); resolve([]); });
+    req.on('error', (e) => {
+      console.log(`⚠️  Request error for ${coin}: ${e.message}`);
+      resolve([]);
+    });
+    req.setTimeout(15000, () => { req.destroy(); resolve([]); });
     req.write(body);
     req.end();
   });
